@@ -1,0 +1,141 @@
+(async () => {
+    // --- THE SMART LOOP (State Recovery) ---
+    let messages = game.messages.contents;
+    let lastResetIndex = -1;
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].content.includes("MULE_SESSION_RESET")) {
+            lastResetIndex = i;
+            break;
+        }
+    }
+
+    let validMessages = lastResetIndex === -1 ? messages : messages.slice(lastResetIndex + 1);
+
+    let currentHand = ["d20", "d12", "d10", "d8", "d6", "d4"];
+    let hasPaid = false;
+    let isEliminated = false;
+
+    validMessages.forEach(m => {
+        // V13 uses m.author.id or m.author.name
+        if (m.author?.id === game.user.id) {
+            if (m.content.includes("DEADEYE_HAND:")) {
+                let handParts = m.content.split("DEADEYE_HAND:");
+                let handData = handParts[1]
+                    .split("DEADEYE_ROUND_TALLY:")[0]
+                    .split("</span>")[0] // Added extra safety for closing tags
+                    .trim();
+
+                if (handData === "" || handData === "OUT") {
+                    isEliminated = true;
+                    currentHand = [];
+                } else {
+                    // STRICT FILTER: Only keep actual dice strings
+                    currentHand = handData
+                        .split(",")
+                        .map(s => s.trim().toLowerCase())
+                        .filter(s => /^d(20|12|10|8|6|4)$/.test(s));
+                    
+                    isEliminated = false;
+                }
+            }
+
+            if (m.content.includes("DEADEYE_GOLD:")) {
+                hasPaid = true;
+            }
+        }
+    });
+
+    // --- LOGIC GATE ---
+    if (isEliminated) {
+        ui.notifications.error("Eliminated! No dice remaining.");
+    } else if (!hasPaid) {
+        let d = new Dialog({
+            title: "Dead Eye Dice: Buy-in",
+            content: "<div style='text-align:center;'><p>Welcome to the circle.</p><div class='form-group'><label>Buy-in Gold:</label><input type='number' id='gold' value='5'></div></div>",
+            buttons: {
+                go: {
+                    label: "Pay & Roll",
+                    callback: async (html) => {
+                        let gp = html.find('#gold').val();
+                        let joinMsg = "<strong>" + game.user.name + "</strong> enters for <b>" + gp + "gp</b>! <span style='display:none'>DEADEYE_GOLD:" + gp + "</span>";
+                        await ChatMessage.create({ content: joinMsg });
+                        await rollDeadEye(["d20", "d12", "d10", "d8", "d6", "d4"]);
+                    }
+                }
+            }
+        });
+        d.render(true);
+    } else {
+        await rollDeadEye(currentHand);
+    }
+
+    // --- ROLL FUNCTION ---
+    async function rollDeadEye(hand) {
+        if (!hand || hand.length === 0) return;
+
+        // Ensure 1dX format and REMOVE any non-dice junk
+        let cleanArray = hand
+            .filter(die => typeof die === 'string' && die.includes('d'))
+            .map(die => {
+                let s = die.toString().trim();
+                return s.startsWith('d') ? "1" + s : s;
+            });
+
+        if (cleanArray.length === 0) {
+            return ui.notifications.warn("Hand was corrupted. Resetting to full hand.");
+        }
+
+        let formula = cleanArray.join(" + ");
+
+        try {
+            let r = new Roll(formula);
+            await r.evaluate();
+
+            await r.toMessage({
+                flavor: "Dead Eye Roll: " + hand.join(", "),
+                speaker: ChatMessage.getSpeaker()
+            });
+
+            let onesCount = 0;
+            r.terms.forEach(term => {
+                if (term.results) {
+                    onesCount += term.results.filter(res => res.result === 1).length;
+                }
+            });
+
+            let discarded = [];
+            let newHand = [...hand];
+
+            for (let i = 0; i < onesCount; i++) {
+                if (newHand.length > 0) {
+                    discarded.push(newHand.shift());
+                }
+            }
+
+            let resultText = onesCount > 0
+                ? "<p style='color:#b71c1c;'><b>LOST:</b> " + discarded.join(", ") + "</p>"
+                : "<p style='color:#2e7d32;'><b>SAFE!</b> No ones rolled.</p>";
+
+            let handTag = newHand.length > 0 ? newHand.join(",") : "OUT";
+            let handDisplay = newHand.length > 0 ? newHand.join(", ") : "OUT";
+
+            let chatContent = "<div style='text-align:center; border:1px solid #782e2e; padding:8px; background:#fff; color:#000;'>" +
+                "<strong>" + game.user.name + " Survival</strong><hr>" +
+                resultText +
+                "<div><small style='color:#000 !important;'>Remaining: " + handDisplay + "</small></div>" +
+                "<span style='display:none'>DEADEYE_HAND:" + handTag + "</span>" +
+                "<span style='display:none'>DEADEYE_ROUND_TALLY:1</span>" +
+                "</div>";
+
+            await ChatMessage.create({
+                content: chatContent,
+                speaker: ChatMessage.getSpeaker()
+            });
+
+        } catch (err) {
+            console.error("V13 Macro Error:", err);
+            ui.notifications.error("Roll failed. Formula was: " + formula);
+        }
+    }
+})();

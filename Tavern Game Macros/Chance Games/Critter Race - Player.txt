@@ -1,0 +1,76 @@
+// =========================================================
+// SECTION 1: CRITTER VIBE DATA
+// =========================================================
+const critters = {
+    "Dog":    { odds: "2.0x", vibe: "The Reliable Pro", info: "Consistent & steady." },
+    "Fox":    { odds: "3.0x", vibe: "The Sprinter",     info: "Quick & never stumbles." },
+    "Pig":    { odds: "6.0x", vibe: "The Wildcard",     info: "Fast, but easily distracted." },
+    "Rat":    { odds: "10.0x", vibe: "The chaotic Blur", info: "Unpredictable burst speed." },
+    "Badger": { odds: "10.0x", vibe: "The Underdog",    info: "Slow, but keeps on going." }
+};
+
+let options = "";
+for (let name in critters) {
+    let c = critters[name];
+    options += `<option value="${name}">${name} (${c.odds}) - ${c.vibe}</option>`;
+}
+
+// =========================================================
+// SECTION 2: THE POPUP
+// =========================================================
+new Dialog({
+    title: "Critter Race: Place Your Bet",
+    content: `
+        <div style="padding:10px; font-family: sans-serif;">
+            <p style="color:black !important; margin-bottom:10px;">Review the racers and place your wager:</p>
+            
+            <label style="font-weight:bold; color:black !important; display:block;">Select Racer:</label>
+            <select id="critter-choice" style="width:100%; background:white !important; color:black !important; height:28px; margin-bottom:15px;">
+                ${options}
+            </select>
+
+            <label style="font-weight:bold; color:black !important; display:block;">Bet Amount (Gold):</label>
+            <input type="number" id="gold-bet" value="5" style="width:100%; text-align:center; background:white !important; color:black !important; height:28px;">
+            
+            <p style="font-size: 0.85em; color: #555 !important; margin-top: 10px; font-style: italic;">
+                "Check the track conditions before you throw your coin!"
+            </p>
+        </div>`,
+    buttons: {
+        confirm: {
+            icon: '<i class="fas fa-ticket-alt"></i>',
+            label: "Buy Ticket",
+            callback: (html) => {
+                let selectedName = html.find('#critter-choice').val();
+                let betAmount = html.find('#gold-bet').val();
+                let critter = critters[selectedName];
+                
+                // --- THE IRONCLAD RACING TICKET ---
+                let chatContent = `
+                <div style="background: #ffffff !important; color: #000000 !important; border: 2px solid #333 !important; padding: 12px !important; border-radius: 5px !important; box-shadow: 2px 2px 5px rgba(0,0,0,0.2) !important;">
+                    <div style="text-align:center !important; border-bottom: 2px dashed #999 !important; font-weight: bold !important; color: #000 !important; margin-bottom: 8px !important; padding-bottom: 5px !important;">
+                        🎟️ OFFICIAL RACING TICKET
+                    </div>
+                    <div style="text-align:center !important; color: #000 !important; line-height: 1.4 !important;">
+                        <span style="font-size: 0.9em !important; text-transform: uppercase !important;">Bettor:</span><br>
+                        <span style="font-weight: bold !important; font-size: 1.2em !important; color: #1a237e !important;">${game.user.name}</span><br>
+                        <div style="margin: 8px 0 !important; padding: 5px !important; background: #f0f0f0 !important; border-radius: 3px !important;">
+                            <span style="font-weight: bold !important;">${selectedName}</span><br>
+                            <small style="color: #666 !important;">${critter.vibe}</small>
+                        </div>
+                        Wager: <b style="color: #000 !important;">${betAmount}gp</b> <br>
+                        Potential Payout: <b style="color: #1b5e20 !important;">${(betAmount * parseFloat(critter.odds)).toFixed(1)}gp</b>
+                    </div>
+                    <span style="display:none">CRITTER_BET_DATA:${game.user.name}:${selectedName}:${betAmount}</span>
+                </div>`;
+
+                ChatMessage.create({ content: chatContent });
+            }
+        },
+        cancel: {
+            icon: '<i class="fas fa-times"></i>',
+            label: "Exit"
+        }
+    },
+    default: "confirm"
+}).render(true);

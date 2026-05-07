@@ -1,0 +1,63 @@
+// --- ONLY RUN FOR THE USER WHO CLICKED THE TILE ---
+const triggeringUserId = args?.[0]?.userId || args?.[0]?.user || game.user.id;
+if (game.user.id !== triggeringUserId) return;
+
+// Identify the acting player (MAT already provides 'actor')
+let participant = actor || game.user.character;
+let opponent = game.user.targets.first();
+
+if (!participant) {
+    return ui.notifications.warn("Please assign a character to your User profile!");
+}
+if (!opponent || !opponent.actor) {
+    return ui.notifications.warn("Please target your opponent!");
+}
+
+// Set up clean references for the UI
+let p1 = { name: participant.name, actor: participant };
+let p2 = { name: opponent.name, actor: opponent.actor };
+
+let playChess = async (p1Score, p2Score) => {
+    let content = `
+        <div style="text-align:center; color:black;">
+            <h3 style="border-bottom:1px solid #782e2e;">Dragonchess Match</h3>
+            <div style="display:flex; justify-content:space-around; font-size:1.2em; margin:10px 0;">
+                <div><strong>${p1.name}</strong><br><span style="font-size:1.5em; color:#4a148c;">${p1Score}</span></div>
+                <div style="align-self:center;">vs</div>
+                <div><strong>${p2.name}</strong><br><span style="font-size:1.5em; color:#4a148c;">${p2Score}</span></div>
+            </div>
+            <p>First to 3 Victory Points wins!</p>
+        </div>
+    `;
+
+    new Dialog({
+        title: "Dragonchess Board",
+        content: content,
+        buttons: {
+            roll: {
+                label: "Contested Intelligence",
+                callback: async () => {
+                    // Pulls Intelligence modifiers directly from the system data
+                    let r1 = await new Roll("1d20 + @mod", {mod: p1.actor?.system.abilities.int.mod || 0}).evaluate();
+                    let r2 = await new Roll("1d20 + @mod", {mod: p2.actor?.system.abilities.int.mod || 0}).evaluate();
+                    
+                    r1.toMessage({flavor: `${p1.name} calculates a move...`});
+                    r2.toMessage({flavor: `${p2.name} counters...`});
+
+                    if (r1.total > r2.total) p1Score++;
+                    else if (r2.total > r1.total) p2Score++;
+
+                    if (p1Score >= 3) {
+                        ChatMessage.create({content: `<strong>Checkmate!</strong> ${p1.name} wins the match! <span style="display:none">CHESS_DATA:${p1.name}:WIN</span>`});
+                    } else if (p2Score >= 3) {
+                        ChatMessage.create({content: `<strong>Checkmate!</strong> ${p2.name} wins the match! <span style="display:none">CHESS_DATA:${p2.name}:WIN</span>`});
+                    } else {
+                        playChess(p1Score, p2Score);
+                    }
+                }
+            }
+        }
+    }).render(true);
+};
+
+playChess(0, 0);

@@ -1,0 +1,112 @@
+// --- ONLY RUN FOR THE USER WHO CLICKED THE TILE ---
+const triggeringUserId = args?.[0]?.userId || args?.[0]?.user || game.user.id;
+if (game.user.id !== triggeringUserId) return;
+
+// Identify the acting player (MAT already provides 'actor')
+let participant = actor || game.user.character;
+
+if (!participant) {
+    return ui.notifications.warn("Please assign a character to your User profile!");
+}
+
+// Universal Scraper Logic (Time-Wall Sync)
+let allMessages = game.messages.contents;
+let resetMsg = [...allMessages].reverse().find(m => m.content.includes("MULE_SESSION_RESET"));
+
+let validMsgs = resetMsg ? allMessages.slice(allMessages.indexOf(resetMsg) + 1) : allMessages;
+
+let totalPies = 0;
+let roundCount = 0;
+let hasAdvantage = false;
+let isOut = false;
+
+validMsgs.forEach(m => {
+    if (m.content.includes(`PIE_DATA:${participant.name}`)) {
+        let data = m.content.split("PIE_DATA:")[1].split("</span>")[0].split(":");
+        let piesThisRound = parseInt(data[1]); 
+        let advFlag = data[2] === "ADV";
+        
+        if (piesThisRound === -99) isOut = true;
+        else totalPies += (piesThisRound > 0 ? piesThisRound : 0);
+        
+        roundCount++;
+        hasAdvantage = advFlag; 
+    }
+});
+
+if (isOut || roundCount >= 5) {
+    let finishMsg = isOut ? `${participant.name} has a weak stomach and is out!` : `${participant.name} has finished all 5 rounds!`;
+    ui.notifications.info(finishMsg);
+    return;
+}
+
+// =========================================================
+// SECTION 2: THE EATING LOGIC
+// =========================================================
+new Dialog({
+    title: `Pie Eating: Round ${roundCount + 1}`,
+    content: `
+        <div style="text-align:center; color: #000000 !important; background: #ffffff !important; padding:15px; border-radius: 5px;">
+            <p style="color: #000000 !important; margin-bottom: 5px;">Pies Devoured: <b style="font-size: 1.2em; color: #000000 !important;">${totalPies}</b></p>
+            <p style="color: #000000 !important;">Round: <b style="color: #000000 !important;">${roundCount + 1} / 5</b></p>
+            ${hasAdvantage ? "<p style='color: #2e7d32 !important;'><b>🌟 ADVANTAGE (from last crit) 🌟</b></p>" : ""}
+            <hr style="border: 0; border-top: 1px solid #ccc; margin: 10px 0;">
+            <p style="color: #000000 !important; font-style: italic;">Reach for another slice...</p>
+        </div>`,
+    buttons: {
+        eat: {
+            label: "Cram it in!",
+            callback: async () => {
+                const formula = hasAdvantage ? "2d20kh + @mod" : "1d20 + @mod";
+                const roll = new Roll(formula, { mod: participant.system.abilities.con.mod || 0 });
+                await roll.evaluate({async: true});
+                
+                await roll.toMessage({ flavor: `${participant.name} attempts to swallow more pie!` });
+
+                let total = roll.total;
+                // Grabs the active die result for critical check
+                let d20roll = roll.dice[0].results.find(r => r.active).result;
+                
+                let piesGained = 0;
+                let nextAdv = "NONE";
+                let flavor = "";
+                let outColor = "#1a237e"; 
+
+                if (d20roll === 1 && !hasAdvantage) {
+                    piesGained = -99;
+                    flavor = "The crust goes down the wrong pipe... 🤮";
+                    outColor = "#b71c1c"; 
+                } else if (d20roll === 20) {
+                    piesGained = 4;
+                    nextAdv = "ADV";
+                    flavor = "A MASTERCLASS IN MASTICATION! Advantage next round!";
+                    outColor = "#c5a000"; 
+                } else if (total >= 18) {
+                    piesGained = 3;
+                } else if (total >= 13) {
+                    piesGained = 2;
+                } else if (total >= 6) {
+                    piesGained = 1;
+                } else {
+                    flavor = "Too much chewing, not enough swallowing...";
+                }
+
+                if (piesGained > 0 && d20roll !== 20) flavor = `Wolfed down ${piesGained} pies!`;
+
+                let finalTotal = isOut ? 0 : totalPies + (piesGained > 0 ? piesGained : 0);
+
+                let chatHtml = `
+                <div style="background: #ffffff !important; color: #000000 !important; border: 2px solid ${outColor} !important; padding: 10px !important; border-radius: 5px !important;">
+                    <h3 style="text-align:center !important; border-bottom: 1px solid #ccc !important; margin-top:0 !important; color: #000000 !important; padding-bottom: 5px !important;">Round ${roundCount + 1}</h3>
+                    <p style="text-align:center !important; margin: 15px 0 !important; color: #000000 !important;">${flavor}</p>
+                    <div style="background: ${outColor} !important; color: #ffffff !important; text-align: center !important; font-weight: bold !important; padding: 8px !important; border-radius: 3px !important; box-shadow: inset 0 0 5px rgba(0,0,0,0.2) !important;">
+                        ${piesGained === -99 ? "🤮 ELIMINATED" : `Total Pies: ${finalTotal}`}
+                    </div>
+                    <span style="display:none">PIE_DATA:${participant.name}:${piesGained}:${nextAdv}</span>
+                </div>`;
+
+                ChatMessage.create({ content: chatHtml });
+            }
+        }
+    }
+}).render(true);

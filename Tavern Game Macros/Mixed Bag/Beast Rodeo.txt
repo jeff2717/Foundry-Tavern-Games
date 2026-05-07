@@ -1,0 +1,151 @@
+// --- ONLY RUN FOR THE USER WHO CLICKED THE TILE ---
+const triggeringUserId = args?.[0]?.userId || args?.[0]?.user || game.user.id;
+if (game.user.id !== triggeringUserId) return;
+
+// Identify the acting player
+let participant = actor || game.user.character;
+
+if (!participant) {
+    return ui.notifications.warn("Please assign a character to your User profile!");
+}
+
+let p1 = { name: participant.name, actor: participant };
+
+const beasts = [
+	{ name: "Stallion", mod:0},
+    { name: "Axebeak", mod: 1 },
+    { name: "Bull", mod: 2 },
+    { name: "Bulette", mod: 3 },
+    
+];
+
+let beastOptions = beasts.map((b, i) => `<option value="${i}">${b.name} (+${b.mod})</option>`).join('');
+
+new Dialog({
+    title: "The Rodeo Pen",
+    content: `
+        <div style="color:black; font-family: 'Signika', sans-serif;">
+            <p>Mount your beast! Can you stay on for 8 seconds?</p>
+            <div style="margin-bottom:10px;">
+                <label><strong>Select Beast:</strong></label>
+                <select id="beastIdx">${beastOptions}</select>
+            </div>
+        </div>
+    `,
+    buttons: {
+        start: {
+            label: "Open the Gate!",
+            callback: async (html) => {
+
+                let bIdx = html.find('#beastIdx').val();
+                let beast = beasts[bIdx];
+                
+                // Animal Handling Check
+                let aniMod = p1.actor?.system?.skills?.ani?.mod 
+                    ?? p1.actor?.system?.skills?.ani?.total 
+                    ?? 0;
+
+                let readRoll = await new Roll("1d20 + @mod", {mod: aniMod}).evaluate();
+                readRoll.toMessage({ flavor: `${p1.name} tries to get a read on the ${beast.name}...` });
+
+                let hasAdvantage = readRoll.total >= 15;
+                            
+                new Dialog({
+                    title: "Read the Beast",
+                    content: `
+                        <div style="text-align:center; color:black;">
+                            <h3 style="border:none;">
+                                ${hasAdvantage ? "🐎 Good Read!" : "⚠️ Unpredictable!"}
+                            </h3>
+                            <p>
+                                ${hasAdvantage 
+                                    ? `You anticipate the ${beast.name}'s movements.<br><b>You have advantage on the first round!</b>`
+                                    : `The ${beast.name} is erratic and hard to read.<br><b>No advantage granted.</b>`
+                                }
+                            </p>
+                        </div>
+                    `,
+                    buttons: {
+                        continue: {
+                            label: "Ride!",
+                            callback: () => {
+                                startRounds(1, hasAdvantage, beast);
+                            }
+                        }
+                    }
+                }).render(true);
+
+            } // ✅ closes callback
+        } // ✅ closes "start"
+    } // ✅ closes "buttons"
+}).render(true); // ✅ closes main Dialog
+
+async function startRounds(round, adv, beast) {
+    let actionRoll = await new Roll("1d4").evaluate();
+    let action = actionRoll.total <= 2
+        ? { name: "Bucking", skill: "ath" }
+        : actionRoll.total === 3
+            ? { name: "Spinning", skill: "acr" }
+            : { name: "Jumping", skill: "save" }; // FIX: Jumping = Athletics (not save)
+
+    let content = `
+        <div style="text-align:center; color:black;">
+            <h3 style="border-bottom:2px solid #782e2e;">Round ${round}</h3>
+            <p>The ${beast.name} is <strong>${action.name}</strong>!</p>
+            <p style="font-size:0.8em;">
+                (Contested ${action.skill === 'ath' ? 'Athletics' : action.skill === 'acr' ? 'Acrobatics' : 'Strength Save'})
+            </p>
+        </div>`;
+
+    new Dialog({
+        title: `Rodeo: Round ${round}`,
+        content: content,
+        buttons: {
+            roll: {
+                label: "Hold On!",
+                callback: async () => {
+
+                    // --- SAFE MOD RESOLUTION ---
+                    const actor = p1.actor;
+                    const skills = actor?.system?.skills ?? {};
+                    const abilities = actor?.system?.abilities ?? {};
+
+                    let riderMod = 0;
+
+					if (action.skill === "ath" || action.skill === "acr") {
+						let val = skills[action.skill]?.mod ?? skills[action.skill]?.total;
+						riderMod = Number(val) || 0;
+					} 
+					else if (action.skill === "save") {
+						riderMod = Number(abilities.str?.save?.value ?? abilities.str?.mod ?? 0);
+					}
+                                    
+
+                    // --- ROLLS ---
+                    let riderFormula = adv ? "2d20kh1" : "1d20";
+                    let beastFormula = "2d20kh1";
+
+                    let rRider = await new Roll(`${riderFormula} + ${Number(riderMod)}`).evaluate();
+                    let rBeast = await new Roll(`${beastFormula} + ${Number(beast.mod ?? 0)}`).evaluate();
+
+                    rRider.toMessage({ flavor: `${p1.name} resists ${action.name}!` });
+                    rBeast.toMessage({ flavor: `${beast.name} bucks wildly!` });
+
+                    // --- OUTCOME ---
+                    if (rRider.total >= rBeast.total) {
+                        startRounds(round + 1, false, beast);
+                    } else {
+                        ChatMessage.create({
+                            content: `
+                                <strong>THUD!</strong> ${p1.name} was bucked off in Round ${round}!
+                                <span style="display:none">
+                                    RODEO_DATA:${p1.name}:${round}:${beast.name}
+                                </span>
+                            `
+                        });
+                    }
+                }
+            }
+        }
+    }).render(true);
+}

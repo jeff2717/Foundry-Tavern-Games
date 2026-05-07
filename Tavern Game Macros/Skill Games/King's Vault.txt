@@ -1,0 +1,60 @@
+// --- ONLY RUN FOR THE USER WHO CLICKED THE TILE ---
+const triggeringUserId = args?.[0]?.userId || args?.[0]?.user || game.user.id;
+if (game.user.id !== triggeringUserId) return;
+
+// Identify the acting player
+let participant = actor || game.user.character;
+
+if (!participant) {
+    return ui.notifications.warn("Please assign a character to your User profile!");
+}
+
+let p1 = { name: participant.name, actor: participant };
+
+new Dialog({
+    title: "The King's Vault",
+    content: `
+        <div style="color:black; font-family: 'Signika', sans-serif;">
+            <p>The attendant begins shuffling the silver cups...</p>
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px; background: #f0f0f0; padding: 10px; border-radius: 5px;">
+                <label><strong>Wager:</strong></label>
+                <input type="number" id="wagerAmount" value="1" style="width:50px;">
+                <input type="radio" id="gp" name="currency" value="gp" checked>
+                <label for="gp">gp</label>
+                <input type="radio" id="sp" name="currency" value="sp">
+                <label for="sp">sp</label>
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label><strong>Difficulty (DC):</strong></label>
+                <input type="number" id="dc" value="16" style="width:60px;">
+            </div>
+        </div>
+    `,
+    buttons: {
+        roll: {
+            label: "Track the Cup",
+            callback: async (html) => {
+                let dc = parseInt(html.find('#dc').val());
+                let amount = html.find('#wagerAmount').val();
+                let currency = html.find('input[name="currency"]:checked').val();
+                let fullWager = amount + currency;
+                
+                // Uses participant's Wisdom modifier
+                let r = await new Roll("1d20 + @mod", {mod: p1.actor?.system.abilities.wis.mod || 0}).evaluate();
+                
+                let success = r.total >= dc;
+                r.toMessage({flavor: `${p1.name} watches the cups intently (DC ${dc})...`});
+
+                if (success) {
+                    ChatMessage.create({
+                        content: `<strong>Winner!</strong> ${p1.name} finds the coin and doubles their <b>${fullWager}</b>! <span style="display:none">VAULT_DATA:${p1.name}:WIN:${fullWager}</span>`
+                    });
+                } else {
+                    ChatMessage.create({
+                        content: `<strong>Empty!</strong> The attendant reveals an empty cup. ${p1.name} loses their <b>${fullWager}</b>.`
+                    });
+                }
+            }
+        }
+    }
+}).render(true);

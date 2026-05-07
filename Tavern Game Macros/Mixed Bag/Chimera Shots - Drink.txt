@@ -1,0 +1,134 @@
+// --- ONLY RUN FOR THE USER WHO CLICKED THE TILE ---
+const triggeringUserId = args?.[0]?.userId || args?.[0]?.user || game.user.id;
+if (game.user.id !== triggeringUserId) return;
+
+// Identify the acting player (MAT already provides 'actor' and 'token')
+// We use a different variable name to avoid the "already declared" error
+let participant = actor || game.user.character;
+
+if (!participant) {
+    return ui.notifications.warn("Please assign a character to your User profile!");
+}
+
+const conMod = participant.system.abilities.con.mod;
+const maxStomach = 10 + conMod;
+
+// Universal Scraper Logic
+let allMessages = game.messages.contents;
+let resetMsg = [...allMessages].reverse().find(m => m.content.includes("MULE_SESSION_RESET"));
+
+let validMsgs = resetMsg ? allMessages.slice(allMessages.indexOf(resetMsg) + 1) : allMessages;
+
+let currentDamage = 0;
+let goatCount = 0;
+
+validMsgs.forEach(m => {
+    if (m.content.includes(`CHIMERA_DATA:${participant.name}`)) {
+        try {
+            let data = m.content.split("CHIMERA_DATA:")[1].split("</span>")[0].split(":");
+            let dmgVal = parseInt(data[1]);
+            
+            if (dmgVal === 99) {
+                currentDamage = maxStomach; 
+            } else {
+                currentDamage += dmgVal;
+            }
+            
+            if (data[2] === "GOAT") goatCount++;
+        } catch (e) {
+            console.error("Failed to parse Chimera message:", e);
+        }
+    }
+});
+
+let currentStomach = maxStomach - currentDamage;
+let nextGoatDC = 8 + (goatCount * 2);
+
+if (currentStomach <= 0) {
+    ui.notifications.error(`${participant.name} is already out of the game!`);
+    return;
+}
+
+// =========================================================
+// SECTION 2: THE UI POPUP
+// =========================================================
+new Dialog({
+    title: `Chimera Shots: ${participant.name}`,
+    content: `
+        <div style="padding:10px; color: black !important;">
+            <p style="color: black !important;">Stomach HP: <b style="color: black !important;">${currentStomach} / ${maxStomach}</b></p>
+            <p style="color: black !important;">Next Goat DC: <b style="color: black !important;">${nextGoatDC}</b></p>
+            <hr style="border-top: 1px solid #ccc;">
+            <p style="text-align:center; color: black !important;">Reach for a shot glass...</p>
+        </div>`,
+    buttons: {
+        roll: {
+            label: "Drink!",
+            callback: async () => {
+                const r = await new Roll("1d8").evaluate({async: true});
+                const result = r.total;
+                let shotName = "";
+                let dmg = 0;
+                let isGoat = "NONE";
+                let flavor = "";
+
+                // Saving Throw Helper
+                async function getSaveResult(dc, flavorText) {
+                    let save;
+                    // Updated to use the participant identified at the top
+                    if (participant.rollSavingThrow) {
+                        save = await participant.rollSavingThrow({ability: "con"});
+                    } else if (participant.rollSave) {
+                        save = await participant.rollSave("con", { flavor: flavorText });
+                    } else {
+                        save = await participant.rollAbilitySave("con", { flavor: flavorText });
+                    }
+                    return save.total;
+                }
+
+                if ([1, 3].includes(result)) {
+                    shotName = "🦁 Lion’s Head";
+                    flavor = "Delicious bourbon cleanses your palate!";
+                } 
+                else if ([2, 4, 7].includes(result)) {
+                    shotName = "🔥 Dragon’s Head";
+                    let total = await getSaveResult(14, "Dragon's Head Fire Sauce");
+                    dmg = (total >= 14) ? 2 : 4;
+                    flavor = `Burning fire sauce! You take <b>${dmg}</b> damage.`;
+                } 
+                else {
+                    shotName = "🐐 Goat’s Head";
+                    isGoat = "GOAT";
+                    let total = await getSaveResult(nextGoatDC, `Goat's Head Sour Milk (DC ${nextGoatDC})`);
+                    if (total < nextGoatDC) {
+                        dmg = 99;
+                        flavor = "The sour milk is too much! You vomit.";
+                    } else {
+                        flavor = "You stomach the sour milk... for now.";
+                    }
+                }
+
+                r.toMessage({flavor: `Grabs a shot... it's the ${shotName}!`});
+        // --- UPDATED CHIMERA CHAT OUTPUT ---
+        let outColor = (currentStomach - dmg <= 0) ? "#b71c1c" : "#1a237e";
+        let statusMsg = (currentStomach - dmg <= 0) ? 
+            (dmg === 99 ? "🤮 VOMITED!" : "🔥 FIREBALL FORFEIT!") : 
+            `Stomach remaining: ${currentStomach - dmg}`;
+        
+        let chatHtml = `
+        <div style="background: #ffffff !important; color: #000000 !important; border: 2px solid ${outColor} !important; padding: 10px !important; border-radius: 5px !important;">
+            <h3 style="text-align:center !important; margin:0 !important; color: #000 !important; border-bottom: 1px solid #ccc !important;">${shotName}</h3>
+            <p style="text-align:center !important; margin:8px 0 !important; color: #000 !important;">${flavor}</p>
+            <div style="background:${outColor} !important; color:#fff !important; text-align:center !important; font-weight:bold !important; padding:5px !important; border-radius: 3px !important;">
+                ${statusMsg}
+            </div>
+            <span style="display:none">CHIMERA_DATA:${participant.name}:${dmg}:${isGoat}</span>
+            <span style="display:none">CHIMERA_ROUND_TALLY:1</span>
+            <span style="display:none">CHIMERA_GOLD:1</span>
+        </div>`;
+        
+        ChatMessage.create({ content: chatHtml });
+            }
+        }
+    }
+}).render(true);

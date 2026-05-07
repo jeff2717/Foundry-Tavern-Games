@@ -1,0 +1,79 @@
+// --- ONLY RUN FOR THE USER WHO CLICKED THE TILE ---
+const triggeringUserId = args?.[0]?.userId || args?.[0]?.user || game.user.id;
+if (game.user.id !== triggeringUserId) return;
+
+// Identify the acting player
+let participant = actor || game.user.character;
+
+if (!participant) {
+    return ui.notifications.warn("Please assign a character to your User profile!");
+}
+let target = game.user.targets.first()?.actor;
+let p1 = { name: participant.name, actor: participant };
+let p2 = target ? { name: target.name, actor: target } : { name: "The House", actor: null };
+
+const sections = [0, 30, 60, 90, 120, 150, 180];
+let currentPos = 3; // Index for 90 (Neutral)
+
+let armWrestle = async (pos) => {
+    let content = `
+        <div style="text-align:center; color:black;">
+            <h3>${p1.name} vs ${p2.name}</h3>
+            <div style="font-size:1.5em; font-weight:bold; margin:10px 0;">
+                Angle: <span style="color:#782e2e;">${sections[pos]}°</span>
+            </div>
+            <p>P1 seeks 0° | P2 seeks 180°</p>
+        </div>
+    `;
+
+    new Dialog({
+        title: "Arm Wrestling Match",
+        content: content,
+        buttons: {
+            roll: {
+                label: "Contested Strength",
+                callback: async () => {
+                    let r1 = await new Roll("1d20 + @mod", {mod: p1.actor?.system.abilities.str.mod || 0}).evaluate();
+                    let r2 = await new Roll("1d20 + @mod", {mod: p2.actor?.system.abilities.str.mod || 0}).evaluate();
+                    
+                    r1.toMessage({flavor: `${p1.name} Pushes!`});
+                    r2.toMessage({flavor: `${p2.name} Resists!`});
+
+                    let move = 0;
+                    let p1Nat20 = r1.terms[0].results[0].result === 20;
+                    let p1Nat1 = r1.terms[0].results[0].result === 1;
+                    let p2Nat20 = r2.terms[0].results[0].result === 20;
+                    let p2Nat1 = r2.terms[0].results[0].result === 1;
+
+                    // Instant Win Condition
+                    if (p1Nat20 && p2Nat1) {
+                         ChatMessage.create({content: `<strong>CRITICAL SLAM!</strong> ${p1.name} wins instantly! <span style="display:none">WRESTLE_DATA:${p1.name}:WIN</span>`});
+                         return;
+                    }
+                    if (p2Nat20 && p1Nat1) {
+                         ChatMessage.create({content: `<strong>CRITICAL SLAM!</strong> ${p2.name} wins instantly! <span style="display:none">WRESTLE_DATA:${p2.name}:WIN</span>`});
+                         return;
+                    }
+
+                    // Standard Move Logic
+                    if (r1.total > r2.total) move = p1Nat20 ? -2 : -1;
+                    if (r2.total > r1.total) move = p2Nat20 ? 2 : 1;
+                    if (p1Nat1) move += 2;
+                    if (p2Nat1) move -= 2;
+
+                    let nextPos = Math.clamped(pos + move, 0, 6);
+                    
+                    if (nextPos === 0) {
+                        ChatMessage.create({content: `<strong>${p1.name} WINS!</strong> <span style="display:none">WRESTLE_DATA:${p1.name}:WIN</span>`});
+                    } else if (nextPos === 6) {
+                        ChatMessage.create({content: `<strong>${p2.name} WINS!</strong> <span style="display:none">WRESTLE_DATA:${p2.name}:WIN</span>`});
+                    } else {
+                        armWrestle(nextPos);
+                    }
+                }
+            }
+        }
+    }).render(true);
+};
+
+armWrestle(currentPos);

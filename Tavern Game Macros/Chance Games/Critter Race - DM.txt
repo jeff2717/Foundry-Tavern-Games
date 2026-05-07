@@ -1,0 +1,111 @@
+// =========================================================
+// SECTION 1: CONFIG & RESET FILTER
+// =========================================================
+const critterConfigs = {
+    "Dog":    { formula: "2d4",   payout: 2.0, emoji: "🐕" },
+    "Fox":    { formula: "1d4+2", payout: 3.0, emoji: "🦊" },
+    "Pig":    { formula: "1d8-1", payout: 6.0, emoji: "🐖" },
+    "Rat":    { formula: "1d12",  payout: 10.0, emoji: "🐀" },
+    "Badger": { formula: "1d6",   payout: 10.0, emoji: "🦡" }
+};
+
+let messages = game.messages.contents;
+// Aggressive check for the Reset tag anywhere in the message content
+let lastResetIndex = -1;
+for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].content.includes("MULE_SESSION_RESET")) {
+        lastResetIndex = i;
+        break;
+    }
+}
+
+// Only look at messages AFTER the reset
+let validMsgs = lastResetIndex === -1 ? messages : messages.slice(lastResetIndex + 1);
+
+// SCRAPE BETS - Only from the valid message slice
+let playerBets = [];
+validMsgs.forEach(m => {
+    if (m.content.includes("CRITTER_BET_DATA:")) {
+        // Splitting logic to grab the data accurately
+        let parts = m.content.split("CRITTER_BET_DATA:")[1].split("</span>")[0].split(":");
+        if (parts.length >= 3) {
+            playerBets.push({ 
+                user: parts[0], 
+                critter: parts[1], 
+                amount: parseFloat(parts[2]) 
+            });
+        }
+    }
+});
+
+// =========================================================
+// SECTION 2: THE RACE ENGINE
+// =========================================================
+async function runRace() {
+    let positions = { "Dog": 0, "Fox": 0, "Pig": 0, "Rat": 0, "Badger": 0 };
+    let finished = false;
+    let round = 1;
+    let logs = [];
+
+    while (!finished) {
+        let roundLog = `<div style="color: #000 !important; margin-bottom:4px;"><b>ROUND ${round}</b></div>`;
+        for (let name of Object.keys(positions)) {
+            let config = critterConfigs[name];
+            let roll = await new Roll(config.formula).evaluate();
+            let move = roll.total;
+            
+            if (name === "Rat") move = Math.ceil(move / 2);
+            if (name === "Pig" && move < 0) move = 0;
+            positions[name] += move;
+            
+            let pos = Math.min(positions[name], 15);
+            let track = ".".repeat(pos).replace(/./g, "—") + config.emoji;
+            
+            roundLog += `<div style="color: #000 !important; font-family: monospace !important; font-size: 13px !important; white-space: nowrap !important;">
+                ${config.emoji} ${track} (${positions[name]})
+            </div>`;
+            
+            if (positions[name] >= 15) finished = true;
+        }
+        logs.push(`<div style="padding:8px !important; border-bottom:1px solid #ddd !important;">${roundLog}</div>`);
+        round++;
+    }
+
+    let sorted = Object.entries(positions).sort((a, b) => b[1] - a[1]);
+    let winnerName = sorted[0][0];
+
+    // =========================================================
+    // SECTION 3: PAYOUTS & IRONCLAD OUTPUT
+    // =========================================================
+    let payoutList = "";
+    playerBets.forEach(b => {
+        let isWin = (b.critter === winnerName);
+        let color = isWin ? "#1b5e20" : "#b71c1c";
+        let status = isWin ? "wins" : "lost";
+        let amountStr = isWin ? (b.amount * critterConfigs[winnerName].payout).toFixed(1) + "gp" : b.amount + "gp";
+        payoutList += `<li style="color:${color} !important;"><b>${b.user}</b> ${status} <b>${amountStr}</b></li>`;
+    });
+
+    const outputHtml = `
+    <div style="background: #ffffff !important; color: #000000 !important; border: 2px solid #222 !important; font-family: sans-serif !important; padding: 0 !important;">
+        <div style="background: #222 !important; color: #fff !important; padding: 10px !important; text-align: center !important; font-weight: bold !important;">
+            🏁 THE GREAT CRITTER RACE 🏁
+        </div>
+        <div style="padding: 10px !important;">
+            ${logs.join("")}
+            <div style="background: #ffd700 !important; color: #000 !important; text-align: center !important; padding: 10px !important; margin: 15px 0 !important; font-weight: bold !important; border: 2px solid #000 !important;">
+                🏆 WINNER: ${critterConfigs[winnerName].emoji} ${winnerName.toUpperCase()} 🏆
+            </div>
+            <div style="color: #000 !important;">
+                <b style="color: #000 !important; border-bottom: 1px solid #000 !important; display: block;">Payout Results:</b>
+                <ul style="padding-left: 20px !important; margin: 0 !important; color: #000 !important;">
+                    ${payoutList || "<li style='color:#000 !important;'>No active bets since last reset.</li>"}
+                </ul>
+            </div>
+        </div>
+    </div>`;
+
+    ChatMessage.create({ content: outputHtml });
+}
+
+runRace();

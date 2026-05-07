@@ -1,0 +1,98 @@
+// --- THE SMART LOOP (Keep this exactly as it was) ---
+let messages = game.messages.contents;
+let lastResetIndex = -1;
+for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].content.includes("MULE_SESSION_RESET")) { lastResetIndex = i; break; }
+}
+let careerTotal = 0;
+let hasPaidBuyIn = false; 
+let validMessages = lastResetIndex === -1 ? messages : messages.slice(lastResetIndex + 1);
+validMessages.forEach(m => {
+    if (m.content.includes("MULE_SCORE_DATA:") && m.user.name === game.user.name) {
+        careerTotal += parseInt(m.content.split("MULE_SCORE_DATA:")[1]) || 0;
+    }
+    if (m.content.includes("MULE_GOLD_DATA:") && m.user.name === game.user.name) { hasPaidBuyIn = true; }
+});
+
+// --- THE LOGIC GATE ---
+if (!hasPaidBuyIn) {
+    new Dialog({
+        title: "Tavern Buy-in",
+        content: `<p>What is your buy-in for this tournament?</p><input type="number" id="buyInAmount" value="5">`,
+        buttons: {
+            start: {
+                label: "Pay & Start",
+                callback: (html) => {
+                    let gold = html.find('#buyInAmount').val();
+                    ChatMessage.create({ content: `<strong>${game.user.name}</strong> tosses <b>${gold}gp</b> into the pot! <span style="display:none">MULE_GOLD_DATA:${gold}</span>` });
+                    playMules(0, 0); 
+                }
+            }
+        }
+    }).render(true);
+} else {
+    playMules(0, 0);
+}
+
+// --- THE GAME LOGIC ---
+function playMules(currentTotal, diceCount) {
+    new Dialog({
+        title: "18 Mules Tavern Game",
+        content: `
+            <div style="text-align: center;">
+                <div style="background: #e9ecef; padding: 5px; border-radius: 4px; border: 1px solid #ccc; margin-bottom: 10px;">
+                   <strong>Tournament Total:</strong> <span style="color: #2d5a27; font-weight: bold;">${careerTotal} / 100</span>
+                </div>
+                <h2>Mules in your Wagon: <b style="color: #d10000;">${currentTotal}</b></h2>
+            </div>
+        `,
+        buttons: {
+            roll: {
+                label: diceCount === 0 ? "Initial 3d6 Roll" : "Add 1 Mule (1d6)",
+                callback: async () => {
+                    let formula = diceCount === 0 ? "3d6" : "1d6";
+                    let r = await new Roll(formula).evaluate();
+                    r.toMessage({flavor: "Rolling for Mules..."});
+                    let newTotal = currentTotal + r.total;
+                    let newCount = diceCount + (diceCount === 0 ? 3 : 1);
+
+                    // --- RESULT: GOLDEN WAGON ---
+                    if (newCount === 3 && newTotal === 18) {
+					ChatMessage.create({
+						content: `<strong>${game.user.name}</strong> GOLDEN WAGON! <span style="display:none">MULE_SCORE_DATA:28 MULE_ROUND_TALLY:1</span>`
+					});
+                        new Dialog({
+                            title: "🏆 GOLDEN WAGON!",
+                            content: `<div style="text-align:center;"><h2>PERFECT!</h2><p>You tied the ropes perfectly. 28 points recorded!</p></div>`,
+                            buttons: { ok: { label: "Excellent" } }
+                        }).render(true);
+                        return;
+                    }
+
+                    // --- RESULT: BUST ---
+                    if (newTotal > 18) {
+                        ChatMessage.create({
+							content: `<strong>${game.user.name}</strong> Bust! <span style="display:none">MULE_SCORE_DATA:0 MULE_ROUND_TALLY:1</span>`
+						});
+                        new Dialog({
+                            title: "💥 Ropes Snapped!",
+                            content: `<div style="text-align:center;"><h2>BUST! (${newTotal})</h2><p>The mules were too strong and the ropes snapped. You get 0 points this round.</p></div>`,
+                            buttons: { ok: { label: "Walk back to town..." } }
+                        }).render(true);
+                        return;
+                    }
+                    
+                    playMules(newTotal, newCount); 
+                }
+            },
+            stay: {
+				label: "Stay",
+				callback: () => {
+					ChatMessage.create({
+						content: `<strong>${game.user.name}</strong> stops. <span style="display:none">MULE_SCORE_DATA:${currentTotal} MULE_ROUND_TALLY:1</span>`
+					});
+				}
+			}
+        }
+    }).render(true);
+}

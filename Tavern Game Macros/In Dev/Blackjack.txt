@@ -1,0 +1,132 @@
+// =========================================================
+// SECTION 1: DATA INITIALIZATION & SCRAPING
+// =========================================================
+let messages = game.messages.contents;
+let lastResetIndex = -1;
+for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].content.includes("MULE_SESSION_RESET")) { lastResetIndex = i; break; }
+}
+let validMessages = lastResetIndex === -1 ? messages : messages.slice(lastResetIndex + 1);
+
+let hasPaid = false;
+validMessages.forEach(m => {
+    if (m.user.name === game.user.name && m.content.includes("BJ_GOLD_DATA:")) {
+        hasPaid = true;
+    }
+});
+
+// =========================================================
+// SECTION 2: THE CARD CONVERTER (Ace & Face Rule)
+// =========================================================
+function getCardValue(roll, currentTotal) {
+    let val = roll === 10 ? 10 : roll; // Treat 10 (0) as 10
+    if (val === 1) {
+        return (currentTotal + 11 <= 21) ? 11 : 1;
+    }
+    return val;
+}
+
+// =========================================================
+// SECTION 3: GAME START & RECURSIVE LOOP
+// =========================================================
+if (!hasPaid) {
+    new Dialog({
+        title: "Blackjack: Place Your Bet",
+        content: `
+            <div style="text-align:center; padding:10px;">
+                <p>Beat the Dealer without going over 21.</p>
+                <input type="number" id="bet" value="5" style="width:60px; text-align:center;"> <b>gp</b>
+            </div>`,
+        buttons: {
+            go: {
+                label: "Deal Cards",
+                callback: async (html) => {
+                    let bet = html.find('#bet').val();
+                    ChatMessage.create({ content: `<strong>${game.user.name}</strong> bets <b>${bet}gp</b>. <span style="display:none">BJ_GOLD_DATA:${bet}</span>` });
+                    
+                    let r = await new Roll("2d10").evaluate();
+                    await r.toMessage({flavor: "Initial Deal"});
+                    
+                    let d1 = r.dice[0].results[0].result;
+                    let d2 = r.dice[1].results[0].result;
+                    
+                    let total = 0;
+                    total += getCardValue(d1, 0);
+                    total += getCardValue(d2, total);
+
+                    // Check for Natural Blackjack
+                    if (total === 21) {
+                         ChatMessage.create({content: `<strong>NATURAL 21!</strong> <br> BJ_SCORE_DATA:21` });
+                         new Dialog({
+                            title: "BLACKJACK!",
+                            content: `<div style="text-align:center;"><h2>Natural 21!</h2><p>You hit the mark on the deal!</p></div>`,
+                            buttons: { ok: { label: "Excellent" } }
+                         }).render(true);
+                         return;
+                    }
+                    playBJ(total, bet);
+                }
+            }
+        }
+    }).render(true);
+} else {
+    ui.notifications.info("A bet is already active. Check chat for your total or wait for the next round!");
+}
+
+// =========================================================
+// SECTION 4: THE HIT/SIT ENGINE (Keeps window open)
+// =========================================================
+function playBJ(currentTotal, bet) {
+    new Dialog({
+        title: "Tavern Blackjack",
+        content: `
+            <div style="text-align:center; padding:10px;">
+                <p style="margin:0; color:#666;">Current Hand</p>
+                <h1 style="font-size: 3em; margin: 0; color:#1a237e;">${currentTotal}</h1>
+                <p style="margin:5px 0;">Betting: <b>${bet}gp</b></p>
+            </div>`,
+        buttons: {
+            hit: {
+                label: "Hit (1d10)",
+                callback: async () => {
+                    let r = await new Roll("1d10").evaluate();
+                    await r.toMessage({flavor: "Hitting..."});
+                    let card = r.dice[0].results[0].result;
+                    let newVal = getCardValue(card, currentTotal);
+                    let newTotal = currentTotal + newVal;
+
+                    // --- RESULT: BUST ---
+                    if (newTotal > 21) {
+                        ChatMessage.create({content: `<strong>${game.user.name}</strong> Busts! (${newTotal}) <br> BJ_SCORE_DATA:0` });
+                        new Dialog({
+                            title: "💥 BUST!",
+                            content: `<div style="text-align:center;"><h2>Total: ${newTotal}</h2><p>You went over 21. Better luck next hand!</p></div>`,
+                            buttons: { ok: { label: "Drat" } }
+                        }).render(true);
+                        return;
+                    }
+
+                    // --- RESULT: AUTOMATIC 21 ---
+                    if (newTotal === 21) {
+                        ChatMessage.create({content: `<strong>${game.user.name}</strong> hits 21! <br> BJ_SCORE_DATA:21` });
+                        new Dialog({
+                            title: "✨ 21!",
+                            content: `<div style="text-align:center;"><h2>PERFECT!</h2><p>You hit exactly 21. Let's see what the dealer has!</p></div>`,
+                            buttons: { ok: { label: "Stay" } }
+                        }).render(true);
+                        return;
+                    }
+                    
+                    // Loop back to Hit/Sit
+                    playBJ(newTotal, bet);
+                }
+            },
+            sit: {
+                label: "Sit",
+                callback: () => {
+                    ChatMessage.create({content: `<strong>${game.user.name}</strong> sits at <b>${currentTotal}</b>. <br> BJ_SCORE_DATA:${currentTotal}` });
+                }
+            }
+        }
+    }).render(true);
+}

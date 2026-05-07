@@ -1,0 +1,16 @@
+// =========================================================
+// THE TIME-WALL RESET (Final Stable Version)
+// =========================================================
+const resetHtml = `
+<div style="background: #111; color: #fff; border: 2px solid #b71c1c; padding: 10px; border-radius: 5px; text-align: center;">
+    <h3 style="color: #fff; margin: 0;">🔔 SESSION RESET 🔔</h3>
+    <p style="margin: 8px 0;">A new chapter begins at the tavern...</p>
+    <span style="display:none">MULE_SESSION_RESET</span>
+</div>`;
+
+ChatMessage.create({
+    content: resetHtml,
+    speaker: { alias: "The Barkeep" }
+});
+
+ui.notifications.info("All games have been zeroed out.");

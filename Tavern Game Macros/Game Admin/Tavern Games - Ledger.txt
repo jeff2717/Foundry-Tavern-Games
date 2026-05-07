@@ -1,0 +1,410 @@
+// SECTION 1: THE UNIVERSAL SCRAPER
+// =========================================================
+let allMessages = game.messages.contents;
+let resetMsg = allMessages.reverse().find(m => m.content.includes("MULE_SESSION_RESET"));
+allMessages.reverse(); 
+
+let validMsgs = resetMsg ? allMessages.slice(allMessages.indexOf(resetMsg) + 1) : allMessages;
+
+let chimeraStandings = {};
+let pieStandings = {};
+let muleStandings = {};
+let dartStandings = {};
+let wrestleWinners = {};
+let chessWinners = {};
+let vaultWins = {};
+let rodeoScores = {};
+let activeBets = []; 
+let deadeyeStandings = {};
+let diceResults = [];
+
+// =========================================================
+// SECTION 2: DATA PARSING (FIXED)
+// =========================================================
+validMsgs.forEach(m => {
+    let name = m.user.name;
+
+    // Inside your validMsgs.forEach loop...
+
+    // --- 1. Chimera Shots (Section 2 - Parsing) ---
+    if (m.content.includes("CHIMERA_")) {
+        // Determine the name: either from the DATA tag or the message user
+        let cName = name; 
+        if (m.content.includes("CHIMERA_DATA:")) {
+            cName = m.content.split("CHIMERA_DATA:")[1].split(":")[0];
+        }
+    
+        // CRITICAL: Initialize if this is the first time we've seen this person
+        if (!chimeraStandings[cName]) {
+            let t = canvas.tokens.placeables.find(token => token.name === cName);
+            let max = t ? (10 + (t.actor?.system?.abilities?.con?.mod || 0)) : 10;
+            chimeraStandings[cName] = { damage: 0, max: max, out: false, reason: "", rounds: 0, gold: 0 };
+        }
+    
+        // Now safely parse the specific tags
+        if (m.content.includes("CHIMERA_DATA:")) {
+            let data = m.content.split("CHIMERA_DATA:")[1].split("</span>")[0].split(":");
+            let dmgVal = parseInt(data[1]);
+            
+            chimeraStandings[cName].damage += dmgVal;
+            if (chimeraStandings[cName].damage >= chimeraStandings[cName].max) {
+                chimeraStandings[cName].out = true;
+                chimeraStandings[cName].reason = (dmgVal === 99) ? "🤮" : "🔥";
+            }
+        }
+    
+        if (m.content.includes("CHIMERA_ROUND_TALLY:")) {
+            chimeraStandings[cName].rounds += 1;
+        }
+    
+        if (m.content.includes("CHIMERA_GOLD:")) {
+            let amt = parseInt(m.content.split("CHIMERA_GOLD:")[1].split("</span>")[0]) || 0;
+            chimeraStandings[cName].gold += amt;
+        }
+    }
+
+    // 2. Pie Eating
+    if (m.content.includes("PIE_DATA:")) {
+        let data = m.content.split("PIE_DATA:")[1].split("</span>")[0].split(":");
+        let pName = data[0];
+        let count = parseInt(data[1]);
+        if (!pieStandings[pName]) pieStandings[pName] = { total: 0, out: false };
+        if (count === -99) pieStandings[pName].out = true;
+        else pieStandings[pName].total += count;
+    }
+
+    // 3. 18 Mules logic
+    if (!muleStandings[name]) muleStandings[name] = { total: 0, rounds: 0, gold: 0 };
+
+    if (m.content.includes("MULE_SCORE_DATA:")) {
+        let score = parseInt(m.content.split("MULE_SCORE_DATA:")[1].split("</span>")[0]) || 0;
+        muleStandings[name].total += score;
+        if (m.content.includes("MULE_ROUND_TALLY:")) {
+            muleStandings[name].rounds += 1;
+        }
+    }
+    
+    if (m.content.includes("MULE_GOLD_DATA:")) {
+        let gold = parseInt(m.content.split("MULE_GOLD_DATA:")[1].split("</span>")[0]) || 0;
+        muleStandings[name].gold += gold;
+    }
+
+    // 4. Dead Eye Dice logic
+    if (!deadeyeStandings[name]) deadeyeStandings[name] = { hand: "d20,d12,d10,d8,d6,d4", rounds: 0, gold: 0 };
+
+    if (m.content.includes("DEADEYE_HAND:")) {
+        let handData = m.content.split("DEADEYE_HAND:")[1].split("</span>")[0];
+        deadeyeStandings[name].hand = handData || "OUT";
+        if (m.content.includes("DEADEYE_ROUND_TALLY:")) {
+            deadeyeStandings[name].rounds += 1;
+        }
+    }
+    
+    if (m.content.includes("DEADEYE_GOLD:")) {
+        let dGold = parseInt(m.content.split("DEADEYE_GOLD:")[1].split("</span>")[0]) || 0;
+        deadeyeStandings[name].gold += dGold;
+    }
+
+    // Legacy Dead Eye Dice (Old Version Support)
+    if (m.content.includes("DEAD_EYE_DATA:")) {
+        let deData = m.content.split("DEAD_EYE_DATA:")[1].split("</span>")[0].split(":");
+        let deName = deData[0];
+        let deScore = deData[1];
+        diceResults = diceResults.filter(d => d.name !== deName);
+        diceResults.push({ name: deName, score: deScore });
+    }
+
+    // 5. Darts
+    if (m.content.includes("DART_DATA:")) {
+        let dData = m.content.split("DART_DATA:")[1].split("</span>")[0].split(":");
+        let dName = dData[0];
+        let dScore = parseInt(dData[1]);
+        if (!dartStandings[dName]) dartStandings[dName] = { total: 0 };
+        dartStandings[dName].total += dScore;
+    }
+	
+	// 7. Arm Wrestling
+	if (m.content.includes("WRESTLE_DATA:")) {
+		let wData = m.content.split("WRESTLE_DATA:")[1].split("</span>")[0].split(":");
+		let wName = wData[0];
+		if (!wrestleWinners[wName]) wrestleWinners[wName] = { wins: 0 };
+		wrestleWinners[wName].wins += 1;
+	}
+	
+	// 8. Dragonchess
+	if (m.content.includes("CHESS_DATA:")) {
+		let cData = m.content.split("CHESS_DATA:")[1].split("</span>")[0].split(":");
+		let cName = cData[0];
+		if (!chessWinners[cName]) chessWinners[cName] = { wins: 0 };
+		chessWinners[cName].wins += 1;
+	}
+	
+	// 9. The King's Vault
+	if (m.content.includes("VAULT_DATA:")) {
+		let vData = m.content.split("VAULT_DATA:")[1].split("</span>")[0].split(":");
+		let vName = vData[0];
+		let winnings = vData[2]; 
+		if (!vaultWins[vName]) vaultWins[vName] = { wins: 0, lastPrize: "" };
+		vaultWins[vName].wins += 1;
+		vaultWins[vName].lastPrize = winnings;
+	}
+	
+	// 10. Bull Riding Rodeo
+	if (m.content.includes("RODEO_DATA:")) {
+		let rData = m.content.split("RODEO_DATA:")[1].split("</span>")[0].split(":");
+		let rName = rData[0];
+		let rRounds = parseInt(rData[1]);
+		let beast = rData[2];
+		if (!rodeoScores[rName] || rRounds > rodeoScores[rName].rounds) {
+			rodeoScores[rName] = { rounds: rRounds, beast: beast };
+		}
+	}
+});
+
+// =========================================================
+// SECTION 3: THE HTML ASSEMBLY (FULL SUITE)
+// =========================================================
+
+// 1. Header & Title (Forced Black)
+let mainContent = `
+    <div style="font-family: 'Signika', sans-serif; color: #000 !important;">
+        <h2 style="text-align:center !important; border-bottom: 2px solid #782e2e !important; color: #000 !important; margin-bottom: 5px !important;">🍻 The Mule's Master Ledger</h2>
+        <p style="text-align:center !important; font-size: 0.8em !important; color: #444 !important; margin-top:0 !important; margin-bottom: 10px !important;">
+            Tracking games since the last reset
+        </p>
+`;
+	// 6. 18 Mules
+		let totalPot = 0;
+		mainContent += `
+			<div style="margin-top:10px; border:1px solid #782e2e; border-radius:5px; overflow:hidden;">
+				<div style="background:#782e2e; color:#fff !important; padding:5px; text-align:center; font-weight:bold;">🫏 18 MULES</div>
+				<table style="width:100%; background:#fff; font-size:0.9em; border-collapse: collapse;">
+					<tr style="background:#f0f0f0;">
+						<th style="padding:5px; text-align:left; color: #000 !important; border-bottom: 1px solid #ccc;">Player</th>
+						<th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Score</th>
+						<th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Rounds</th>
+						<th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Paid</th>
+						<th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Goal</th>
+					</tr>`;
+
+		// Sort by score (highest first)
+		let sortedMules = Object.entries(muleStandings).sort((a,b) => b[1].total - a[1].total);
+
+		for (let [name, data] of sortedMules) {
+			totalPot += data.gold;
+			let progress = Math.min((data.total / 100) * 100, 100);
+			let barColor = progress >= 100 ? "#ffc107" : "#4caf50"; // Gold if finished, Green if racing
+
+			mainContent += `<tr>
+				<td style="padding:5px; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;"><b>${name}</b></td>
+				<td style="padding:5px; text-align:center; font-weight:bold; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;">${data.total}</td>
+				<td style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;">${data.rounds}</td>
+				<td style="padding:5px; text-align:center; color: #2d5a27; border-bottom: 1px solid #eee; background:#f0f0f0;">${data.gold}g</td>
+				<td style="padding:5px; border-bottom: 1px solid #eee; background:#f0f0f0; width: 60px;">
+					<div style="background: #e0e0e0; border-radius: 4px; height: 12px; width: 100%; position: relative;">
+						<div style="background: ${barColor}; width: ${progress}%; height: 100%; border-radius: 4px;"></div>
+					</div>
+				</td>
+			</tr>`;
+		}
+
+		mainContent += `
+			<tr style="background:#fff8e1;">
+				<td colspan="3" style="padding:5px; text-align:right; font-weight:bold; color: #000 !important;">CURRENT WINNINGS POT:</td>
+				<td colspan="2" style="padding:5px; text-align:left; font-weight:bold; color:#b48900;">💰 ${totalPot} gp</td>
+			</tr>
+		</table></div>`;
+	
+	// 5. DEAD EYE DICE (Orange/Black Theme)
+		let deadeyePot = 0;
+		mainContent += `
+			<div style="margin-top:10px; border:1px solid #e65100; border-radius:5px; overflow:hidden;">
+				<div style="background:#e65100; color:#fff !important; padding:5px; text-align:center; font-weight:bold;">🎲 DEAD EYE DICE: CIRCLE STANDINGS</div>
+				<table style="width:100%; background:#fff; font-size:0.9em; border-collapse: collapse;">
+					<tr style="background:#f0f0f0;">
+						<th style="padding:5px; text-align:left; color: #000 !important; border-bottom: 1px solid #ccc;">Player</th>
+						<th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Dice Left</th>
+						<th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Rds</th>
+						<th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Buy-in</th>
+					</tr>`;
+
+		for (let [name, data] of Object.entries(deadeyeStandings)) {
+			deadeyePot += data.gold;
+			let isOut = data.hand === "OUT";
+			let rowStyle = isOut ? "color: #999; background: #f9f9f9;" : "color: #000; background: #f0f0f0;";
+
+			mainContent += `<tr style="${rowStyle}">
+				<td style="padding:5px; border-bottom: 1px solid #eee;">${isOut ? "💀 " : "🟢 "}<b>${name}</b></td>
+				<td style="padding:5px; text-align:center; font-weight:bold; border-bottom: 1px solid #eee;">${data.hand}</td>
+				<td style="padding:5px; text-align:center; border-bottom: 1px solid #eee;">${data.rounds}</td>
+				<td style="padding:5px; text-align:center; color: #2d5a27; border-bottom: 1px solid #eee;">${data.gold}g</td>
+			</tr>`;
+		}
+
+		mainContent += `
+			<tr style="background:#fff3e0;">
+				<td colspan="3" style="padding:5px; text-align:right; font-weight:bold; color: #000 !important;">DEAD EYE POT:</td>
+				<td style="padding:5px; text-align:center; font-weight:bold; color:#e65100;">💰 ${deadeyePot} gp</td>
+			</tr>
+		</table></div>`;
+		
+	// 2. CHIMERA SHOTS (Red Theme) - Updated Table
+		  let chimeraPot = 0;
+		  mainContent += `
+			  <div style="margin-top:10px; border:1px solid #b71c1c; border-radius:5px; overflow:hidden;">
+				  <div style="background:#b71c1c; color:#fff !important; padding:5px; text-align:center; font-weight:bold;">🦁 CHIMERA SHOTS</div>
+				  <table style="width:100%; background:#fff; font-size:0.9em; border-collapse: collapse;">
+					  <tr style="background:#f0f0f0;">
+						  <th style="padding:5px; text-align:left; color: #000 !important; border-bottom: 1px solid #ccc;">Player</th>
+						  <th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">HP</th>
+						  <th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Rds</th>
+						  <th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Paid</th>
+						  <th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Status</th>
+					  </tr>`;
+		  
+		  for (let [name, data] of Object.entries(chimeraStandings)) {
+			  chimeraPot += data.gold;
+			  let hp = data.max - data.damage;
+			  mainContent += `<tr>
+				  <td style="padding:5px; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;"><b>${name}</b></td>
+				  <td style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;">${hp <= 0 ? 0 : hp} / ${data.max}</td>
+				  <td style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;">${data.rounds}</td>
+				  <td style="padding:5px; text-align:center; color: #2d5a27; border-bottom: 1px solid #eee; background:#f0f0f0;">${data.gold}g</td>
+				  <td style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;">${data.out ? data.reason : "🟢"}</td>
+			  </tr>`;
+		  }
+      mainContent += `
+          <tr style="background:#ffebee;">
+              <td colspan="3" style="padding:5px; text-align:right; font-weight:bold; color: #000 !important;">CHIMERA POT:</td>
+              <td colspan="2" style="padding:5px; text-align:left; font-weight:bold; color:#b71c1c;">💰 ${chimeraPot} gp</td>
+          </tr>
+      </table></div>`;
+
+	// 3. PIE EATING (Blue Theme)
+		mainContent += `
+			<div style="margin-top:10px; border:1px solid #1a237e; border-radius:5px; overflow:hidden;">
+				<div style="background:#1a237e; color:#fff !important; padding:5px; text-align:center; font-weight:bold;">🥧 PIE EATING</div>
+				<table style="width:100%; background:#fff; font-size:0.9em; border-collapse: collapse;">
+					<tr style="background:#f0f0f0;">
+						<th style="padding:5px; text-align:left; color: #000 !important; border-bottom: 1px solid #ccc;">Player</th>
+						<th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Pies</th>
+					</tr>`;
+		for (let [name, data] of Object.entries(pieStandings)) {
+			mainContent += `<tr>
+				<td style="padding:5px; color: #000 !important; border-bottom: 1px solid #eee;background:#f0f0f0;">${name}</td>
+				<td style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #eee;background:#f0f0f0;">${data.out ? "🤮 OUT" : data.total}</td>
+			</tr>`;
+		}
+		mainContent += `</table></div>`;
+
+	// 4. DARTS (Green Theme)
+		mainContent += `
+			<div style="margin-top:10px; border:1px solid #2e7d32; border-radius:5px; overflow:hidden;">
+				<div style="background:#2e7d32; color:#fff !important; padding:5px; text-align:center; font-weight:bold;">🎯 DARTS</div>
+				<table style="width:100%; background:#fff; font-size:0.9em; border-collapse: collapse;">
+					<tr style="background:#f0f0f0;">
+						<th style="padding:5px; text-align:left; color: #000 !important; border-bottom: 1px solid #ccc;">Player</th>
+						<th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Score</th>
+					</tr>`;
+		let sortedDarts = Object.entries(dartStandings).sort((a,b) => b[1].total - a[1].total);
+		for (let [name, data] of sortedDarts) {
+			mainContent += `<tr>
+			<td style="padding:5px; color: #000 !important; border-bottom: 1px solid #eee;background:#f0f0f0;">${name}</td>
+			<td style="padding:5px; text-align:center; font-weight:bold; color: #000 !important; border-bottom: 1px solid #eee;background:#f0f0f0;">${data.total}</td></tr>`;
+		}
+		mainContent += `</table></div>`;
+		
+	
+
+	// 7. ARM WRESTLING (Brown/Wood Theme)
+		mainContent += `
+			<div style="margin-top:10px; border:1px solid #5d4037; border-radius:5px; overflow:hidden;">
+				<div style="background:#5d4037; color:#fff !important; padding:5px; text-align:center; font-weight:bold;">💪 ARM WRESTLING CHAMPIONS</div>
+				<table style="width:100%; background:#fff; font-size:0.9em; border-collapse: collapse;">
+					<tr style="background:#f0f0f0;">
+						<th style="padding:5px; text-align:left; color: #000 !important; border-bottom: 1px solid #ccc;">Contestant</th>
+						<th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Wins</th>
+					</tr>`;
+		for (let [name, data] of Object.entries(wrestleWinners)) {
+			mainContent += `<tr>
+				<td style="padding:5px; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;">${name}</td>
+				<td style="padding:5px; text-align:center; font-weight:bold; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;">${data.wins}</td>
+			</tr>`;
+		}
+		mainContent += `</table></div>`;
+
+	// 8. DRAGONCHESS (Purple Theme)
+	mainContent += `
+		<div style="margin-top:10px; border:1px solid #4a148c; border-radius:5px; overflow:hidden;">
+			<div style="background:#4a148c; color:#fff !important; padding:5px; text-align:center; font-weight:bold;">♟️ DRAGONCHESS GRANDMASTERS</div>
+			<table style="width:100%; background:#fff; font-size:0.9em; border-collapse: collapse;">
+				<tr style="background:#f0f0f0;">
+					<th style="padding:5px; text-align:left; color: #000 !important; border-bottom: 1px solid #ccc;">Player</th>
+					<th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Match Wins</th>
+				</tr>`;
+	for (let [name, data] of Object.entries(chessWinners)) {
+		mainContent += `<tr>
+			<td style="padding:5px; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;">${name}</td>
+			<td style="padding:5px; text-align:center; font-weight:bold; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;">${data.wins}</td>
+		</tr>`;
+	}
+	mainContent += `</table></div>`;
+	
+	// 9. THE KING'S VAULT (Silver/Grey Theme)
+	mainContent += `
+		<div style="margin-top:10px; border:1px solid #757575; border-radius:5px; overflow:hidden;">
+			<div style="background:#757575; color:#fff !important; padding:5px; text-align:center; font-weight:bold;">🏆 KING'S VAULT WINNERS</div>
+			<table style="width:100%; background:#fff; font-size:0.9em; border-collapse: collapse;">
+				<tr style="background:#f0f0f0;">
+					<th style="padding:5px; text-align:left; color: #000 !important; border-bottom: 1px solid #ccc;">Player</th>
+					<th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Correct Guesses</th>
+					<th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Last Wager</th>
+				</tr>`;
+	for (let [name, data] of Object.entries(vaultWins)) {
+		mainContent += `<tr>
+			<td style="padding:5px; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;">${name}</td>
+			<td style="padding:5px; text-align:center; font-weight:bold; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;">${data.wins}</td>
+			<td style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;">${data.lastPrize}</td>
+		</tr>`;
+	}
+	mainContent += `</table></div>`;
+	
+	// 10. RODEO (Orange/Dust Theme)
+	mainContent += `
+		<div style="margin-top:10px; border:1px solid #bf360c; border-radius:5px; overflow:hidden;">
+			<div style="background:#bf360c; color:#fff !important; padding:5px; text-align:center; font-weight:bold;">🐂 RODEO BEST RIDES</div>
+			<table style="width:100%; background:#fff; font-size:0.9em; border-collapse: collapse;">
+				<tr style="background:#f0f0f0;">
+					<th style="padding:5px; text-align:left; color: #000 !important; border-bottom: 1px solid #ccc;">Rider</th>
+					<th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Rounds</th>
+					<th style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #ccc;">Beast</th>
+				</tr>`;
+	for (let [name, data] of Object.entries(rodeoScores)) {
+		mainContent += `<tr>
+			<td style="padding:5px; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;">${name}</td>
+			<td style="padding:5px; text-align:center; font-weight:bold; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;">${data.rounds}</td>
+			<td style="padding:5px; text-align:center; color: #000 !important; border-bottom: 1px solid #eee; background:#f0f0f0;">${data.beast}</td>
+		</tr>`;
+	}
+	mainContent += `</table></div>`;
+	
+mainContent += `</div>`;
+
+// =========================================================
+// SECTION 4: SEND TO CHAT
+// =========================================================
+
+// We wrap the whole thing in a styled div to ensure it looks good in the chat sidebar
+let chatWrapper = `
+    <div style="background: #fff; color: #000; border: 2px solid #782e2e; padding: 10px; border-radius: 5px;">
+        ${mainContent}
+        <div style="text-align:right; font-size:0.7em; color:#999; margin-top:10px; border-top:1px solid #eee;">
+            Official Mule Ledger Entry
+        </div>
+    </div>
+`;
+
+ChatMessage.create({
+    content: chatWrapper,
+    speaker: { alias: "The Barkeep" } // This makes it look like the NPC is posting it
+});
